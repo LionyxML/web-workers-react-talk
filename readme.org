@@ -73,9 +73,14 @@ https://vite.dev/guide/assets.html#importing-script-as-a-worker
 *** Demo
 
 chrome://inspect/#workers
+
 debugger/breakpoints, etc.
 
+
+watch:
+
 fibCache.size
+
 Array.from(fibCache.entries())
 
 -----
