@@ -1,0 +1,201 @@
+* Tech Talk: Explorando Web Workers no Mundo React
+
+** Introdução
+
+- Olá, pessoal! Hoje vamos explorar uma ferramenta pouco utilizada,
+  mas muito poderosa: os *Web Workers*.
+
+- Vamos ver como eles podem ajudar a manter nossas interfaces React
+  responsivas mesmo com tarefas pesadas de computação.
+
+- Vamos começar com um problema real: *Fibonacci na UI*.
+
+-----
+
+** Parte 1 – O problema: Cálculo pesado trava a UI
+
+- Imagine que sua aplicação React precisa calcular Fibonacci(42) com
+  recursão.
+
+- A UI congela. Botões não respondem. É frustrante.
+
+- Isso acontece porque o JavaScript roda em *single thread*, ou
+  seja, tudo acontece no mesmo fluxo.
+
+*** Demonstração
+
+*** Outra forma de importar
+https://vite.dev/guide/assets.html#importing-script-as-a-worker
+
+-----
+
+** Parte 2 – Solução: Web Worker
+
+- Um *Web Worker* roda código JS em uma thread separada.
+
+- Isso permite mover tarefas pesadas para fora do "main thread",
+  mantendo a UI leve e fluida.
+
+*** Demonstração
+
+-----
+
+** Parte 3 – Múltiplas tarefas: Workers lidam bem com filas?
+
+- Vamos testar: o que acontece quando clicamos várias vezes rápido?
+
+- Spoiler: o worker trata todas as requisições ao mesmo tempo, *sem
+  ordem garantida*.
+
+*** Demonstração
+
+-----
+
+** Parte 4 – Controlando a ordem: Worker com fila
+
+- Agora criamos um *worker com fila interna*.
+
+- Cada tarefa é enfileirada e executada uma por vez.
+
+- Ideal para manter controle sobre o fluxo e ordem dos resultados.
+
+*** Demonstração
+
+-----
+
+** Parte 5 – Shared Workers: compartilhando entre abas/componentes
+
+- Um *SharedWorker* pode ser usado por múltiplos componentes ou até
+  múltiplas abas.
+
+- Ideal para tarefas centralizadas, cache de resultados ou comunicação
+  entre contextos.
+
+*** Demonstração
+
+chrome://inspect/#workers
+debugger/breakpoints, etc.
+
+fibCache.size
+Array.from(fibCache.entries())
+
+-----
+
+** Conclusão
+
+- Web Workers são poderosos para desempenho e controle.
+
+- Workers comuns funcionam por instância. SharedWorkers compartilham
+  contexto.
+
+- Workers *não têm acesso ao DOM*, `window`, etc. Eles são focados
+  em cálculo e comunicação.
+
+- Workers *não garantem execução em fila*
+
+- Podemos implementar filas, timeouts, retries, cache, ou até usar
+  *Comlink* para facilitar.
+
+O que acontece se chamarmos fib(99999999)?
+Pequeno exemplo de timeout:
+
+#+begin_src javascript
+const TIMEOUT = 3000; // 3 segundos
+
+const taskPromise = new Promise((resolve) => {
+  worker.postMessage(data);
+  worker.onmessage = (e) => resolve(e.data);
+});
+
+const timeout = new Promise((_, reject) =>
+  setTimeout(() => reject(new Error("Timeout")), TIMEOUT)
+);
+
+Promise.race([taskPromise, timeout])
+  .then((result) => ...)
+  .catch((err) => ...);
+#+end_src
+
+Exemplo de retries:
+
+#+begin_src javascript
+async function tryWithRetry(task, maxTries = 3) {
+  for (let i = 0; i < maxTries; i++) {
+    try {
+      return await sendTaskToWorker(task);
+    } catch (e) {
+      if (i === maxTries - 1) throw e;
+    }
+  }
+}
+#+end_src
+
+Exemplo de cache em memória:
+
+#+begin_src javascript
+const fibCache = new Map();
+
+function cachedFib(n) {
+  if (fibCache.has(n)) return fibCache.get(n);
+  const result = fib(n);
+  fibCache.set(n, result);
+  return result;
+}
+#+end_src
+
+Exemplo de utilização com Comlink:
+
+https://github.com/GoogleChromeLabs/comlink
+
+#+begin_src javascript
+// worker.js
+import { expose } from "comlink";
+
+function fib(n) { ... }
+
+expose({ fib });
+#+end_src
+
+#+begin_src javascript
+// main thread
+import { wrap } from "comlink";
+
+const worker = new Worker("./worker.js");
+const api = wrap(worker);
+
+const result = await api.fib(42); // como se fosse local
+#+end_src
+
+-----
+
+** Perguntas?
+
+** Comparações
+*** Web Workers vs Shared Workers vs Service Workers
+| Recurso / Capacidade             | Web Worker                          | Shared Worker                             | Service Worker*                                   |
+|----------------------------------+-------------------------------------+-------------------------------------------+---------------------------------------------------|
+| Escopo                           | Página ou aba única                 | Compartilhado entre abas (mesma origem)   | Global (site inteiro, independente de abas)       |
+| Compartilhado entre abas         | Não                                 | Sim                                       | Sim                                               |
+| Comunicação                      | `postMessage` (1:1)                 | `port.postMessage` (muitos:1)             | `postMessage`, `fetch`, Push API, etc.            |
+| Persiste após fechar a aba       | Não                                 | Não                                       | Sim (gerenciado pelo navegador)                   |
+| Executado em thread separada     | Sim, thread em segundo plano        | Sim, thread em segundo plano              | Sim, thread em segundo plano (baseado em eventos) |
+| Caso de uso                      | Delegar tarefas pesadas de CPU      | Coordenar lógica entre abas               | Sincronização em segundo plano, cache, push       |
+| Exemplo típico                   | Processamento de imagem, computação | Reutilizar conexão com banco de dados     | Aplicativos offline, notificações push            |
+| Compartilhamento de memória      | Não (exceto `SharedArrayBuffer`)    | Sim, via mensagens entre abas             | Não                                               |
+| Acesso ao DOM                    | Não                                 | Não                                       | Não                                               |
+| Intercepta requisições de rede   | Não                                 | Não                                       | Sim (interceptação com `fetch`)                   |
+| Funciona sem interface gráfica   | Não (encerra ao fechar a página)    | Não (encerra ao fechar a última aba)      | Sim                                               |
+| Requer contexto seguro (HTTPS)   | Não                                 | Não                                       | Sim (HTTPS obrigatório)                           |
+| Pode armazenar recursos em cache | Não                                 | Não                                       | Sim (via Cache API)                               |
+| Suporte nos navegadores          | Excelente                           | Parcial (alguns navegadores não suportam) | Excelente                                         |
+
+*** Resumo de casos de uso:
+
+| Caso de uso                         | Worker recomendado           |
+|-------------------------------------+------------------------------|
+| Cálculos pesados (ex: Fibonacci)    | Web Worker                   |
+| Coordenação entre abas              | Shared Worker                |
+| Aplicações offline                  | Service Worker               |
+| Sincronização ou notificações       | Service Worker               |
+| Compartilhamento de DB entre abas   | Shared Worker                |
+| Processamento de imagem/áudio/vídeo | Web Worker + OffscreenCanvas |

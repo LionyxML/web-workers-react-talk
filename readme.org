@@ -1,0 +1,199 @@
+* Tech Talk: Exploring Web Workers in the React World
+
+** Introduction
+
+- Hello, everyone! Today we're going to explore a tool that’s rarely used
+  but extremely powerful: *Web Workers*.
+
+- We'll see how they can help keep our React UIs responsive,
+  even when doing heavy computations.
+
+- Let's begin with a real-world problem: *Fibonacci in the UI*.
+
+-----
+
+** Part 1 – The problem: Heavy computation freezes the UI
+
+- Imagine your React app needs to calculate Fibonacci(42)
+  using recursion.
+
+- The UI freezes. Buttons become unresponsive. It’s frustrating.
+
+- This happens because JavaScript runs on a *single thread*, so
+  everything happens in the same flow.
+
+*** Demo
+
+*** Alternative way to import
+https://vite.dev/guide/assets.html#importing-script-as-a-worker
+
+-----
+
+** Part 2 – Solution: Web Worker
+
+- A *Web Worker* runs JS code in a separate thread.
+
+- This allows moving heavy tasks off the "main thread",
+  keeping the UI smooth and fluid.
+
+*** Demo
+
+-----
+
+** Part 3 – Multiple tasks: Do Workers handle queues?
+
+- Let’s test: what happens when we click several times quickly?
+
+- Spoiler: the worker handles all requests at the same time, *without
+  guaranteed order*.
+
+*** Demo
+
+-----
+
+** Part 4 – Controlling order: Worker with a queue
+
+- We now create a *worker with an internal queue*.
+
+- Each task is queued and processed one at a time.
+
+- Ideal to maintain control over flow and result order.
+
+*** Demo
+
+-----
+
+** Part 5 – Shared Workers: Sharing across tabs/components
+
+- A *SharedWorker* can be used by multiple components or even
+  multiple browser tabs.
+
+- Ideal for centralized tasks, result caching, or cross-context communication.
+
+*** Demo
+
+chrome://inspect/#workers
+debugger/breakpoints, etc.
+
+fibCache.size
+Array.from(fibCache.entries())
+
+-----
+
+** Conclusion
+
+- Web Workers are powerful for performance and control.
+
+- Regular Workers work per instance. SharedWorkers share
+  context across tabs.
+
+- Workers *have no access to the DOM*, `window`, etc. They are focused
+  on computation and messaging.
+
+- Workers *do not guarantee FIFO execution*.
+
+- We can implement queues, timeouts, retries, caching, or even use
+  *Comlink* to simplify things.
+
+What happens if we call fib(99999999)?
+Small timeout example:
+
+#+begin_src javascript
+const TIMEOUT = 3000; // 3 seconds
+
+const taskPromise = new Promise((resolve) => {
+  worker.postMessage(data);
+  worker.onmessage = (e) => resolve(e.data);
+});
+
+const timeout = new Promise((_, reject) =>
+  setTimeout(() => reject(new Error("Timeout")), TIMEOUT)
+);
+
+Promise.race([taskPromise, timeout])
+  .then((result) => ...)
+  .catch((err) => ...);
+#+end_src
+
+Retry example:
+
+#+begin_src javascript
+async function tryWithRetry(task, maxTries = 3) {
+  for (let i = 0; i < maxTries; i++) {
+    try {
+      return await sendTaskToWorker(task);
+    } catch (e) {
+      if (i === maxTries - 1) throw e;
+    }
+  }
+}
+#+end_src
+
+Memory cache example:
+
+#+begin_src javascript
+const fibCache = new Map();
+
+function cachedFib(n) {
+  if (fibCache.has(n)) return fibCache.get(n);
+  const result = fib(n);
+  fibCache.set(n, result);
+  return result;
+}
+#+end_src
+
+Using Comlink:
+
+https://github.com/GoogleChromeLabs/comlink
+
+#+begin_src javascript
+// worker.js
+import { expose } from "comlink";
+
+function fib(n) { ... }
+
+expose({ fib });
+#+end_src
+
+#+begin_src javascript
+// main thread
+import { wrap } from "comlink";
+
+const worker = new Worker("./worker.js");
+const api = wrap(worker);
+
+const result = await api.fib(42); // feels like a local call
+#+end_src
+
+-----
+
+** Questions?
+** Comparisons
+*** Web Workers vs Shared Workers vs Service Workers
+| Feature / Capability              | Web Worker                          | Shared Worker                          | Service Worker*                                   |
+|----------------------------------+-------------------------------------+----------------------------------------+---------------------------------------------------|
+| Scope                            | Single page/tab                     | Shared across tabs (same origin)       | Global (site-wide, independent of tabs)           |
+| Shared across tabs               | No                                  | Yes                                    | Yes                                               |
+| Communication                    | `postMessage` (1:1)                 | `port.postMessage` (many:1)            | `postMessage`, `fetch`, Push API, etc.            |
+| Persists after tab closes        | No                                  | No                                     | Yes (managed by browser)                          |
+| Runs in a separate thread        | Yes, background thread              | Yes, background thread                 | Yes, background thread (event-based)              |
+| Use case                         | Offload CPU-heavy tasks             | Coordinate logic across tabs           | Background sync, caching, push notifications      |
+| Typical example                  | Image processing, computations      | Reusing DB connection across tabs      | Offline apps, push notifications                  |
+| Memory sharing                   | No (except `SharedArrayBuffer`)     | Yes, via messaging                     | No                                                |
+| DOM access                       | No                                  | No                                     | No                                                |
+| Network interception             | No                                  | No                                     | Yes (`fetch` interception)                        |
+| Works without UI/tab open        | No (stops when tab closes)          | No (stops when last tab closes)        | Yes                                               |
+| Requires secure context (HTTPS)  | No                                  | No                                     | Yes (HTTPS required)                              |
+| Can cache resources              | No                                  | No                                     | Yes (via Cache API)                               |
+| Browser support                  | Excellent                           | Partial                                | Excellent                                         |
+
+*** Use case summary:
+
+| Use Case                             | Recommended Worker            |
+|-------------------------------------+-------------------------------|
+| Heavy computations (e.g., Fibonacci)| Web Worker                    |
+| Coordination between tabs           | Shared Worker                 |
+| Offline applications                | Service Worker                |
+| Sync or notifications               | Service Worker                |
+| Sharing DB connections between tabs | Shared Worker                 |
+| Image/audio/video processing        | Web Worker + OffscreenCanvas  |
